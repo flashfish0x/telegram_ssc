@@ -34,14 +34,21 @@ bot = telebot.TeleBot(SSC_BOT_KEY)
 @bot.message_handler(commands=['hi'])
 def greet(message):
   bot.send_message(message.chat.id, "hey!")
+  strin = "SSCs:"
   for s in sscs:
       strat = interface.GenericStrategy(s)
-      vault = interface.Vault032(strat.vault())
+      vault = assess_vault_version(strat.vault())
       params = vault.strategies(strat)
       lastTime = params.dict()["lastReport"]
       since_last =  int(time.time()) - lastTime
-      strin = str("Strat: " + strat.name() + s + "Last Harvest (h):" + "{:.1f}".format((since_last)/60/60))
-      bot.send_message(message.chat.id, strin)
+      strin = strin + "\n\n" + strat.name() + " " + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+  bot.send_message(message.chat.id, strin)
 
+def assess_vault_version(vault):
+    if int(interface.Vault032(vault).apiVersion().replace(".", "")) > 31:
+        return interface.Vault032(vault)
+    else:
+        return interface.Vault031(vault)
 
 bot.polling()
+
