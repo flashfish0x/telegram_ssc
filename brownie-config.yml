@@ -6,6 +6,8 @@ networks:
 # automatically fetch contract sources from Etherscan
 autofetch_sources: True
 
+dotenv: .env
+
 
 # path remapping to support imports from GitHub/NPM
 compiler:
