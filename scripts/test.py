@@ -12,66 +12,88 @@ from brownie import (
     Wei,
     ZERO_ADDRESS,
 )
-import time
+import time, re, json
 
 load_dotenv()
-
 SSC_BOT_KEY = os.getenv("SSC_BOT_KEY")
-sscs = ['0xf840d061E83025F4cD6610AE5DDebCcA43327f9f', # -usdt
-    '0x80af28cb1e44C44662F144475d7667C9C0aaB3C3', #- usdc
-    '0xb85413f6d07454828eAc7E62df7d847316475178', #- ssc hbtc
-    '0x4b254EbBbb8FDb9D3E848501784692b2726b310c', #- ssc bbtc
-    '0x29367915508e47c631d220caEbA855901c13a3dE', #- ssc pbtc
-    '0x64B2a32f030D9210E51ed8884C0D58b89137Ca81', #- ssc obtc
-    '0xa6D1C610B3000F143c18c75D84BaA0eC22681185', #- saave
-    '0x74b3E5408B1c29E571BbFCd94B09D516A4d81f36', #- saave
-    '0x8784889b0d48a223c3F48312651643Edd8526bbD', #- ssc dai
-    '0x8c44Cc5c0f5CD2f7f17B9Aca85d456df25a61Ae8', # ecrv
-    '0xCdC3d3A18c9d83Ee6E10E91B48b1fcb5268C97B5'] # steth
+USE_DYNAMIC_LOOKUP = os.getenv("USE_DYNAMIC_LOOKUP")
+ENV = os.getenv("ENV")
 
-bot = telebot.TeleBot(SSC_BOT_KEY)
+def main():
+    bot = telebot.TeleBot(SSC_BOT_KEY)
+    sscs = lookup_sscs()
+    addresses_provider = interface.AddressProvider("0x9be19Ee7Bc4099D62737a7255f5c227fBcd6dB93")
+    oracle = interface.Oracle(addresses_provider.addressById("ORACLE"))
+    
+    strin = "SSCs:"
+    for s in sscs:
+        strat = interface.GenericStrategy(s)
+        vault = assess_vault_version(strat.vault())
+        token = interface.IERC20(vault.token())
+        token_price = get_price(oracle, token.address)
+        usd_tendable = token_price * token.balanceOf(s) / 10**token.decimals()
+        gov = accounts.at(vault.governance(), force=True)
+        params = vault.strategies(strat)
+        lastTime = params.dict()["lastReport"]
+        since_last =  int(time.time()) - lastTime
+
+        beforeRatio = params.dict()["debtRatio"]
+        beforeDebt = params.dict()["totalDebt"]
+        beforeGain = params.dict()["totalGain"]
+        beforeLoss = params.dict()["totalLoss"]
+        
+        assets = vault.totalAssets()
+        realRatio = beforeDebt/(assets+1)
+
+        if beforeRatio == 0 and realRatio < 0.01:
+            continue
+
+        try:
+            strat.harvest({'from': gov})
+            params = vault.strategies(strat)
+            profit = params.dict()["totalGain"] - beforeGain
+            loss = params.dict()["totalLoss"] - beforeLoss
+            percent = 0
+            if beforeDebt > 0:
+                if loss > profit:
+                    percent = -1 * loss / beforeDebt 
+                else:
+                    percent = profit / beforeDebt
+            over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
+            strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ") \nLast Harvest (h): " + "{:.1f}".format((since_last)/60/60) + '\nDesired Ratio: ' + "{:.2%}".format(params.dict()["debtRatio"]/10000) + '\nReal Ratio: ' + "{:.2%}".format(realRatio) + "\nBasic APR: " + "{:.1%}".format(over_year) + "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
+        except:
+            strin = strin + "\n\n" + strat.name() + " Failed Harvest! " + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+
+    bot.send_message(-1001485969849, strin, parse_mode ="markdown", disable_web_page_preview = True)
+
+def lookup_sscs():
+    if USE_DYNAMIC_LOOKUP == "False":
+        f = open("ssc_list.json", "r", errors="ignore")
+        data = json.load(f)
+        ssc_strats = data['sscs']
+    else:
+        # Fetch all v2 strategies and query by name
+        addresses_provider = Contract("0x9be19Ee7Bc4099D62737a7255f5c227fBcd6dB93")
+        strategies_helper = Contract(addresses_provider.addressById("HELPER_STRATEGIES"))
+        v2_strategies = strategies_helper.assetsStrategiesAddresses()
+        ssc_strats = []
+        for s in v2_strategies:
+            strat = interface.GenericStrategy(s)
+            name = strat.name().lower()
+            style1 = re.search("singlesided", name)
+            style2 = re.search("ssc", name)
+            if style1 or style2:
+                ssc_strats.append(s)
+                vault = interface.Vault032(strat.vault())
+                print(strat.address, vault.name(), strat.name())
+
+    return ssc_strats
+
 def assess_vault_version(vault):
     if int(interface.Vault032(vault).apiVersion().replace(".", "")) > 31:
         return interface.Vault032(vault)
     else:
         return interface.Vault031(vault)
 
-#@bot.message_handler(commands=['hi'])
-#def greet(message):
-strin = "SSCs:"
-for s in sscs:
-    strat = interface.GenericStrategy(s)
-    vault = assess_vault_version(strat.vault())
-    gov = accounts.at(vault.governance(), force=True)
-    params = vault.strategies(strat)
-    lastTime = params.dict()["lastReport"]
-    since_last =  int(time.time()) - lastTime
-
-    beforeDebt = params.dict()["totalDebt"]
-    beforeGain = params.dict()["totalGain"]
-    beforeLoss = params.dict()["totalLoss"]
-    
-    assets = vault.totalAssets()
-    realRatio = beforeDebt/(assets+1)
-
-    try:
-        strat.harvest({'from': gov})
-
-        params = vault.strategies(strat)
-        profit = params.dict()["totalGain"] - beforeGain
-        loss = params.dict()["totalLoss"] - beforeLoss
-        percent = 0
-        if beforeDebt > 0:
-            if loss > profit:
-                percent = -1 * loss / beforeDebt 
-            else:
-                percent = profit / beforeDebt
-        over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
-        strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ") Last Harvest (h): " + "{:.1f}".format((since_last)/60/60) + ' Desired Ratio: ' + "{:.2%}".format(params.dict()["debtRatio"]/10000) + ' Real Ratio: ' + "{:.2%}".format(realRatio) + " - Basic APR: " + "{:.1%}".format(over_year)
-    except:
-        strin = strin + "\n\n" + strat.name() + " Failed Harvest! " + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
-
-
-
-bot.send_message(-1001485969849, strin, parse_mode ="markdown", disable_web_page_preview = True)
-
+def get_price(oracle, token):
+    return oracle.getPriceUsdcRecommended(token) / 10**6
