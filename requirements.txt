@@ -2,4 +2,3 @@ pyTelegramBotAPI
 python-dotenv
 eth-brownie
 web3
-ganache-cli
