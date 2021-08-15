@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-# import telebot
+import telebot
 from brownie import (
     Contract,
     accounts,
@@ -20,7 +20,7 @@ USE_DYNAMIC_LOOKUP = os.getenv("USE_DYNAMIC_LOOKUP")
 ENV = os.getenv("ENV")
 
 def main():
-    # bot = telebot.TeleBot(SSC_BOT_KEY)
+    bot = telebot.TeleBot(SSC_BOT_KEY)
     sscs = lookup_sscs()
     addresses_provider = interface.AddressProvider("0x9be19Ee7Bc4099D62737a7255f5c227fBcd6dB93")
     oracle = interface.Oracle(addresses_provider.addressById("ORACLE"))
@@ -66,8 +66,7 @@ def main():
         except:
             strin = strin + "\n\n" + strat.name() + " Failed Harvest! " + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
 
-    # bot.send_message(-1001485969849, strin, parse_mode ="markdown", disable_web_page_preview = True)
-    print(strin)
+    bot.send_message(-1001485969849, strin, parse_mode ="markdown", disable_web_page_preview = True)
 
 def lookup_sscs():
     if USE_DYNAMIC_LOOKUP == "False":
