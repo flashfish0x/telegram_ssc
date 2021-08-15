@@ -35,6 +35,10 @@ def main():
         token = interface.IERC20(vault.token())
         token_price = get_price(oracle, token.address)
         usd_tendable = token_price * token.balanceOf(s) / 10**token.decimals()
+        if usd_tendable > 100:
+            tendable_str = "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
+        else:
+            tendable_str = ""
         gov = accounts.at(vault.governance(), force=True)
         params = vault.strategies(strat)
         lastTime = params.dict()["lastReport"]
@@ -68,7 +72,7 @@ def main():
                 else:
                     percent = profit / beforeDebt
             over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
-            strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n" + s + " \nLast Harvest (h): " + "{:.1f}".format((since_last)/60/60) + "\nProfit on harvest (USD): $"+ "{:,.2f}".format(profit_usd) + '\nDesired Ratio: ' + "{:.2%}".format(desiredRatio/10000) + ' (delta: $'+ "{:,.2f}".format(debt_delta_usd)+')\nReal Ratio: ' + "{:.2%}".format(realRatio) + "\nBasic APR: " + "{:.1%}".format(over_year) + "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
+            strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n" + s + " \nLast Harvest (h): " + "{:.1f}".format((since_last)/60/60) + "\nProfit on harvest (USD): $"+ "{:,.2f}".format(profit_usd) + '\nDesired Ratio: ' + "{:.2%}".format(desiredRatio/10000) + ' (delta: $'+ "{:,.2f}".format(debt_delta_usd)+')\nReal Ratio: ' + "{:.2%}".format(realRatio) + "\nBasic APR: " + "{:.1%}".format(over_year) + tendable_str
         except:
             strin = strin + "\n\n" + strat.name() + "\n🚨 Failed Harvest!\n" + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
 
