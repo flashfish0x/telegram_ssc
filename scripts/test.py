@@ -21,38 +21,50 @@ ENV = os.getenv("ENV")
 
 def main():
     bot = telebot.TeleBot(SSC_BOT_KEY)
+    test_group = os.getenv("TEST_GROUP")
+    prod_group = os.getenv("PROD_GROUP")
     sscs = lookup_sscs()
     addresses_provider = interface.AddressProvider("0x9be19Ee7Bc4099D62737a7255f5c227fBcd6dB93")
     oracle = interface.Oracle(addresses_provider.addressById("ORACLE"))
     
-    strin = "SSCs:"
+    strin = ""
+    count = 0
     for s in sscs:
         strat = interface.GenericStrategy(s)
         vault = assess_vault_version(strat.vault())
         token = interface.IERC20(vault.token())
         token_price = get_price(oracle, token.address)
         usd_tendable = token_price * token.balanceOf(s) / 10**token.decimals()
+        if usd_tendable > 100:
+            tendable_str = "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
+        else:
+            tendable_str = ""
         gov = accounts.at(vault.governance(), force=True)
         params = vault.strategies(strat)
         lastTime = params.dict()["lastReport"]
         since_last =  int(time.time()) - lastTime
 
-        beforeRatio = params.dict()["debtRatio"]
+        desiredRatio = params.dict()["debtRatio"]
         beforeDebt = params.dict()["totalDebt"]
         beforeGain = params.dict()["totalGain"]
         beforeLoss = params.dict()["totalLoss"]
         
         assets = vault.totalAssets()
-        realRatio = beforeDebt/(assets+1)
+        realRatio = beforeDebt/(assets+1) 
 
-        if beforeRatio == 0 and realRatio < 0.01:
+        if desiredRatio == 0 and realRatio < 0.01:
             continue
-
+        
+        count = count + 1
+        
         try:
             strat.harvest({'from': gov})
             params = vault.strategies(strat)
             profit = params.dict()["totalGain"] - beforeGain
+            profit_usd = token_price * profit / 10**token.decimals()
             loss = params.dict()["totalLoss"] - beforeLoss
+            debt_delta = params.dict()["totalDebt"] - beforeDebt
+            debt_delta_usd = token_price * debt_delta / 10**token.decimals()
             percent = 0
             if beforeDebt > 0:
                 if loss > profit:
@@ -60,11 +72,17 @@ def main():
                 else:
                     percent = profit / beforeDebt
             over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
-            strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ") \nLast Harvest (h): " + "{:.1f}".format((since_last)/60/60) + '\nDesired Ratio: ' + "{:.2%}".format(params.dict()["debtRatio"]/10000) + '\nReal Ratio: ' + "{:.2%}".format(realRatio) + "\nBasic APR: " + "{:.1%}".format(over_year) + "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
+            strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n" + s + " \nLast Harvest (h): " + "{:.1f}".format((since_last)/60/60) + "\nProfit on harvest (USD): $"+ "{:,.2f}".format(profit_usd) + '\nDesired Ratio: ' + "{:.2%}".format(desiredRatio/10000) + ' (delta: $'+ "{:,.2f}".format(debt_delta_usd)+')\nReal Ratio: ' + "{:.2%}".format(realRatio) + "\nBasic APR: " + "{:.1%}".format(over_year) + tendable_str
         except:
-            strin = strin + "\n\n" + strat.name() + " Failed Harvest! " + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+            strin = strin + "\n\n" + strat.name() + "\n🚨 Failed Harvest!\n" + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
 
-    bot.send_message(-1001485969849, strin, parse_mode ="markdown", disable_web_page_preview = True)
+    strin = str(count) + " total active strategies found." + strin
+    if ENV == "PROD":
+        chat_id = prod_group
+    else:
+        chat_id = test_group
+
+    bot.send_message(chat_id, strin, parse_mode ="markdown", disable_web_page_preview = True)
 
 def lookup_sscs():
     if USE_DYNAMIC_LOOKUP == "False":
