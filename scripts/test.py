@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-import telebot, emoji
+import telebot
 from brownie import (
     Contract,
     accounts,
