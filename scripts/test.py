@@ -43,6 +43,7 @@ def main():
         params = vault.strategies(strat)
         lastTime = params.dict()["lastReport"]
         since_last =  int(time.time()) - lastTime
+        hours_since_last = since_last/60/60
 
         desiredRatio = params.dict()["debtRatio"]
         beforeDebt = params.dict()["totalDebt"]
@@ -58,23 +59,43 @@ def main():
         count = count + 1
         
         try:
-            strat.harvest({'from': gov})
-            params = vault.strategies(strat)
-            profit = params.dict()["totalGain"] - beforeGain
-            profit_usd = token_price * profit / 10**token.decimals()
-            loss = params.dict()["totalLoss"] - beforeLoss
-            debt_delta = params.dict()["totalDebt"] - beforeDebt
-            debt_delta_usd = token_price * debt_delta / 10**token.decimals()
-            percent = 0
-            if beforeDebt > 0:
-                if loss > profit:
-                    percent = -1 * loss / beforeDebt 
-                else:
-                    percent = profit / beforeDebt
-            over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
-            strin = strin + "\n\n[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n" + s + " \nLast Harvest (h): " + "{:.1f}".format((since_last)/60/60) + "\nProfit on harvest (USD): $"+ "{:,.2f}".format(profit_usd) + '\nDesired Ratio: ' + "{:.2%}".format(desiredRatio/10000) + ' (delta: $'+ "{:,.2f}".format(debt_delta_usd)+')\nReal Ratio: ' + "{:.2%}".format(realRatio) + "\nBasic APR: " + "{:.1%}".format(over_year) + tendable_str
+            print("Harvesting strategy: " + s)
+            tx = strat.harvest({'from': gov})
         except:
-            strin = strin + "\n\n" + strat.name() + "\n🚨 Failed Harvest!\n" + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+            strin = strin + "\n\n" + strat.name() + "\n\U0001F6A8 Failed Harvest!\n" + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+            continue
+        
+        params = vault.strategies(strat)
+        profit = params.dict()["totalGain"] - beforeGain
+        profit_usd = token_price * profit / 10**token.decimals()
+        loss = params.dict()["totalLoss"] - beforeLoss
+        debt_delta = params.dict()["totalDebt"] - beforeDebt
+        debt_delta_usd = token_price * debt_delta / 10**token.decimals()
+        percent = 0
+        if beforeDebt > 0:
+            if loss > profit:
+                percent = -1 * loss / beforeDebt 
+            else:
+                percent = profit / beforeDebt
+        over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
+
+        # Set harvest inidcator
+        shouldHarvest = False
+        if hours_since_last > 200 or profit_usd > 30_000:
+            shouldHarvest = True
+        harvestIndicator = ""
+        if shouldHarvest:
+            harvestIndicator = "\U0001F468" + "\u200D" + "\U0001F33E "
+        
+        # Generate display string
+        strin = strin + "\n\n"+harvestIndicator+"[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n"
+        strin = strin + s 
+        strin = strin + " \nLast Harvest (h): " + "{:.1f}".format(hours_since_last) 
+        strin = strin + "\nProfit on harvest USD: $"+ "{:,.2f}".format(profit_usd) 
+        strin = strin + '\nRatio (Desired | Real): ' + "{:.2%}".format(desiredRatio/10000) + ' | ' + "{:.2%}".format(realRatio) 
+        strin = strin + '\nDebt delta: $'+ "{:,.2f}".format(debt_delta_usd)
+        strin = strin + "\nBasic APR: " + "{:.1%}".format(over_year) 
+        strin = strin + tendable_str
 
     strin = str(count) + " total active strategies found." + strin
     if ENV == "PROD":
@@ -83,6 +104,7 @@ def main():
         chat_id = test_group
 
     bot.send_message(chat_id, strin, parse_mode ="markdown", disable_web_page_preview = True)
+    #print(strin)
 
 def lookup_sscs():
     if USE_DYNAMIC_LOOKUP == "False":
