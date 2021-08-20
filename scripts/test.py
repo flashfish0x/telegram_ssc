@@ -79,16 +79,19 @@ def main():
                 percent = profit / beforeDebt
         over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
 
-        # Set harvest inidcator
-        shouldHarvest = False
+        # Set inidcators
+        should_harvest = False
+        harvest_indicator = ""
+        tend_indicator = ""
         if hours_since_last > 200 or profit_usd > 30_000:
-            shouldHarvest = True
-        harvestIndicator = ""
-        if shouldHarvest:
-            harvestIndicator = "\U0001F468" + "\u200D" + "\U0001F33E "
+            should_harvest = True
+        if should_harvest:
+            harvest_indicator = "\U0001F468" + "\u200D" + "\U0001F33E "
+        if usd_tendable > 0:
+            tend_indicator = "\U0001F33E "
         
         # Generate display string
-        strin = strin + "\n\n"+harvestIndicator+"[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n"
+        strin = strin + "\n\n"+harvest_indicator+tend_indicator+"[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n"
         strin = strin + s 
         strin = strin + " \nLast Harvest (h): " + "{:.1f}".format(hours_since_last) 
         strin = strin + "\nProfit on harvest USD: $"+ "{:,.2f}".format(profit_usd) 
