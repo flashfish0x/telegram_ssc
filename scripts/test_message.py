@@ -25,4 +25,4 @@ def main():
     chat_id = test_group
     print("Chat ID:",chat_id)
     strin = "test"
-    bot.send_message(chat_id, strin, parse_mode ="markdown", disable_web_page_preview = True)
+    bot.send_message(chat_id, strin, parse_mode ="MarkdownV2", disable_web_page_preview = True)

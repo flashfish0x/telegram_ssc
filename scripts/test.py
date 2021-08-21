@@ -1,5 +1,9 @@
 import os
+
 from dotenv import load_dotenv
+import pandas as pd
+from tabulate import tabulate
+import prettytable as pt
 import telebot
 from brownie import (
     Contract,
@@ -21,24 +25,25 @@ ENV = os.getenv("ENV")
 
 def main():
     bot = telebot.TeleBot(SSC_BOT_KEY)
+    report_string = []
     test_group = os.getenv("TEST_GROUP")
     prod_group = os.getenv("PROD_GROUP")
+    if ENV == "PROD":
+        chat_id = prod_group
+    else:
+        chat_id = test_group
     sscs = lookup_sscs()
     addresses_provider = interface.AddressProvider("0x9be19Ee7Bc4099D62737a7255f5c227fBcd6dB93")
     oracle = interface.Oracle(addresses_provider.addressById("ORACLE"))
     
-    strin = ""
     count = 0
-    for s in sscs:
+    for i, s in enumerate(sscs):
+        string = ""
         strat = interface.GenericStrategy(s)
         vault = assess_vault_version(strat.vault())
         token = interface.IERC20(vault.token())
         token_price = get_price(oracle, token.address)
         usd_tendable = token_price * token.balanceOf(s) / 10**token.decimals()
-        if usd_tendable > 100:
-            tendable_str = "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
-        else:
-            tendable_str = ""
         gov = accounts.at(vault.governance(), force=True)
         params = vault.strategies(strat)
         lastTime = params.dict()["lastReport"]
@@ -62,7 +67,8 @@ def main():
             print("Harvesting strategy: " + s)
             tx = strat.harvest({'from': gov})
         except:
-            strin = strin + "\n\n" + strat.name() + "\n\U0001F6A8 Failed Harvest!\n" + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+            string = "\n\n" + strat.name() + s + "\n\U0001F6A8 Failed Harvest!\n"
+            report_string.append(string)
             continue
         
         params = vault.strategies(strat)
@@ -80,34 +86,42 @@ def main():
         over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
 
         # Set inidcators
-        should_harvest = False
         harvest_indicator = ""
         tend_indicator = ""
         if hours_since_last > 200 or profit_usd > 30_000:
-            should_harvest = True
-        if should_harvest:
             harvest_indicator = "\U0001F468" + "\u200D" + "\U0001F33E "
         if usd_tendable > 0:
             tend_indicator = "\U0001F33E "
         
-        # Generate display string
-        strin = strin + "\n\n"+harvest_indicator+tend_indicator+"[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n"
-        strin = strin + s 
-        strin = strin + " \nLast Harvest (h): " + "{:.1f}".format(hours_since_last) 
-        strin = strin + "\nProfit on harvest USD: $"+ "{:,.2f}".format(profit_usd) 
-        strin = strin + '\nRatio (Desired | Real): ' + "{:.2%}".format(desiredRatio/10000) + ' | ' + "{:.2%}".format(realRatio) 
-        strin = strin + '\nDebt delta: $'+ "{:,.2f}".format(debt_delta_usd)
-        strin = strin + "\nBasic APR: " + "{:.1%}".format(over_year) 
-        strin = strin + tendable_str
+        df = pd.DataFrame(index=[''])
+        df[harvest_indicator+tend_indicator+strat.name()] = s
+        df["Last Harvest (h): "] =      "{:.1f}".format(hours_since_last)
+        df["Profit on harvest USD"] =   "${:,.2f}".format(profit_usd)
+        df["Ratio (Desired | Real):"] = "{:.2%}".format(desiredRatio/10000) + ' | ' + "{:.2%}".format(realRatio)
+        df["Debt delta:"] =             "${:,.2f}".format(debt_delta_usd)
+        df["Basic APR:"] =              "{:.1%}".format(over_year)
+        if usd_tendable > 0:
+            df["Tendable Amount in USD:"] = "{:,.2f}".format(usd_tendable)
 
-    strin = str(count) + " total active strategies found." + strin
-    if ENV == "PROD":
-        chat_id = prod_group
-    else:
-        chat_id = test_group
+        report_string.append(df.T.to_string())
 
-    bot.send_message(chat_id, strin, parse_mode ="markdown", disable_web_page_preview = True)
-    #print(strin)
+
+    messages = []
+    idx = 0
+    for i, report in enumerate(report_string):
+        if i % 4 == 0:
+            idx = len(messages)
+            messages.append("")
+        messages[idx] = messages[idx] + report + "\n"
+    
+    for i,m in enumerate(messages):
+        page = "Page " + str(i+1) + "/" + str(len(messages)) + "\n"
+        m = f"```{m}\n```"
+        if i == 0:
+            m = str(count) + " total active strategies found.\n" + m
+        else:
+            m = page + m
+        bot.send_message(chat_id, m, parse_mode="markdown", disable_web_page_preview = True)
 
 def lookup_sscs():
     if USE_DYNAMIC_LOOKUP == "False":
