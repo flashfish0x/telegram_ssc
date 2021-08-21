@@ -2,8 +2,6 @@ import os
 
 from dotenv import load_dotenv
 import pandas as pd
-from tabulate import tabulate
-import prettytable as pt
 import telebot
 from brownie import (
     Contract,
