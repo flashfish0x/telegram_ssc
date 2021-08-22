@@ -1,5 +1,7 @@
 import os
+
 from dotenv import load_dotenv
+import pandas as pd
 import telebot
 from brownie import (
     Contract,
@@ -21,39 +23,40 @@ ENV = os.getenv("ENV")
 
 def main():
     bot = telebot.TeleBot(SSC_BOT_KEY)
+    report_string = []
     test_group = os.getenv("TEST_GROUP")
     prod_group = os.getenv("PROD_GROUP")
+    if ENV == "PROD":
+        chat_id = prod_group
+    else:
+        chat_id = test_group
     sscs = lookup_sscs()
     addresses_provider = interface.AddressProvider("0x9be19Ee7Bc4099D62737a7255f5c227fBcd6dB93")
     oracle = interface.Oracle(addresses_provider.addressById("ORACLE"))
     
-    strin = ""
     count = 0
-    for s in sscs:
+    for i, s in enumerate(sscs):
+        string = ""
         strat = interface.GenericStrategy(s)
         vault = assess_vault_version(strat.vault())
         token = interface.IERC20(vault.token())
         token_price = get_price(oracle, token.address)
         usd_tendable = token_price * token.balanceOf(s) / 10**token.decimals()
-        if usd_tendable > 100:
-            tendable_str = "\nTendable Amount in USD: $"+ "{:,.2f}".format(usd_tendable)
-        else:
-            tendable_str = ""
         gov = accounts.at(vault.governance(), force=True)
         params = vault.strategies(strat)
-        lastTime = params.dict()["lastReport"]
-        since_last =  int(time.time()) - lastTime
-        hours_since_last = since_last/60/60
+        last_report = params.dict()["lastReport"]
+        since_last = "%dd, %dhr, %dm" % dhms_from_seconds(int(time.time() - last_report))
+        hours_since_last = int(time.time() - last_report)/60/60
 
-        desiredRatio = params.dict()["debtRatio"]
-        beforeDebt = params.dict()["totalDebt"]
-        beforeGain = params.dict()["totalGain"]
-        beforeLoss = params.dict()["totalLoss"]
+        target_ratio = params.dict()["debtRatio"]
+        before_debt = params.dict()["totalDebt"]
+        before_gain = params.dict()["totalGain"]
+        before_loss = params.dict()["totalLoss"]
         
         assets = vault.totalAssets()
-        realRatio = beforeDebt/(assets+1) 
+        actual_ratio = before_debt/(assets+1) 
 
-        if desiredRatio == 0 and realRatio < 0.01:
+        if target_ratio == 0 and actual_ratio < 0.01:
             continue
         
         count = count + 1
@@ -62,49 +65,62 @@ def main():
             print("Harvesting strategy: " + s)
             tx = strat.harvest({'from': gov})
         except:
-            strin = strin + "\n\n" + strat.name() + "\n\U0001F6A8 Failed Harvest!\n" + s + " Last Harvest (h): " + "{:.1f}".format((since_last)/60/60)
+            string = "\n\n" + strat.name() + s + "\n\U0001F6A8 Failed Harvest!\n"
+            report_string.append(string)
             continue
         
         params = vault.strategies(strat)
-        profit = params.dict()["totalGain"] - beforeGain
+        profit = params.dict()["totalGain"] - before_gain
         profit_usd = token_price * profit / 10**token.decimals()
-        loss = params.dict()["totalLoss"] - beforeLoss
-        debt_delta = params.dict()["totalDebt"] - beforeDebt
+        loss = params.dict()["totalLoss"] - before_loss
+        debt_delta = params.dict()["totalDebt"] - before_debt
         debt_delta_usd = token_price * debt_delta / 10**token.decimals()
         percent = 0
-        if beforeDebt > 0:
+        if before_debt > 0:
             if loss > profit:
-                percent = -1 * loss / beforeDebt 
+                percent = -1 * loss / before_debt 
             else:
-                percent = profit / beforeDebt
+                percent = profit / before_debt
         over_year = percent * 3.154e+7 / (params.dict()["lastReport"] - lastTime)
 
-        # Set harvest inidcator
-        shouldHarvest = False
-        if hours_since_last > 200 or profit_usd > 30_000:
-            shouldHarvest = True
-        harvestIndicator = ""
-        if shouldHarvest:
-            harvestIndicator = "\U0001F468" + "\u200D" + "\U0001F33E "
+        # Set inidcators
+        harvest_indicator = ""
+        tend_indicator = ""
+        if hours_since_last > 200 or profit_usd > 50_000:
+            harvest_indicator = "\U0001F468" + "\u200D" + "\U0001F33E "
+        if usd_tendable > 0:
+            tend_indicator = "\U0001F33E "
         
-        # Generate display string
-        strin = strin + "\n\n"+harvestIndicator+"[" + strat.name() + "](https://etherscan.io/address/" + s + ")\n"
-        strin = strin + s 
-        strin = strin + " \nLast Harvest (h): " + "{:.1f}".format(hours_since_last) 
-        strin = strin + "\nProfit on harvest USD: $"+ "{:,.2f}".format(profit_usd) 
-        strin = strin + '\nRatio (Desired | Real): ' + "{:.2%}".format(desiredRatio/10000) + ' | ' + "{:.2%}".format(realRatio) 
-        strin = strin + '\nDebt delta: $'+ "{:,.2f}".format(debt_delta_usd)
-        strin = strin + "\nBasic APR: " + "{:.1%}".format(over_year) 
-        strin = strin + tendable_str
+        df = pd.DataFrame(index=[''])
+        df[harvest_indicator+tend_indicator+strat.name()] = s
+        df[vault.name() + " " + vault.apiVersion()] = vault.address
+        df["Time Since Harvest: "] =      since_last
+        df["Profit on Harvest USD"] =   "${:,.2f}".format(profit_usd)
+        df["Ratio (Target | Actual):"] = "{:.2%}".format(target_ratio/10000) + ' | ' + "{:.2%}".format(actual_ratio)
+        df["Debt Delta:"] =             "${:,.2f}".format(debt_delta_usd)
+        df["Pre-fee APR:"] =              "{:.2%}".format(over_year)
+        if usd_tendable > 0:
+            df["Tendable Amount in USD:"] = "{:,.2f}".format(usd_tendable)
 
-    strin = str(count) + " total active strategies found." + strin
-    if ENV == "PROD":
-        chat_id = prod_group
-    else:
-        chat_id = test_group
+        report_string.append(df.T.to_string())
 
-    bot.send_message(chat_id, strin, parse_mode ="markdown", disable_web_page_preview = True)
-    #print(strin)
+
+    messages = []
+    idx = 0
+    for i, report in enumerate(report_string):
+        if i % 5 == 0:
+            idx = len(messages)
+            messages.append("")
+        messages[idx] = messages[idx] + report + "\n"
+    
+    for i,m in enumerate(messages):
+        page = "Page " + str(i+1) + "/" + str(len(messages)) + "\n"
+        m = f"```{m}\n```"
+        if i == 0:
+            m = str(count) + " total active strategies found.\n" + m
+        else:
+            m = page + m
+        bot.send_message(chat_id, m, parse_mode="markdown", disable_web_page_preview = True)
 
 def lookup_sscs():
     if USE_DYNAMIC_LOOKUP == "False":
@@ -137,3 +153,9 @@ def assess_vault_version(vault):
 
 def get_price(oracle, token):
     return oracle.getPriceUsdcRecommended(token) / 10**6
+
+def dhms_from_seconds(seconds):
+	minutes, seconds = divmod(seconds, 60)
+	hours, minutes = divmod(minutes, 60)
+	days, hours = divmod(hours, 24)
+	return (days, hours, minutes)
